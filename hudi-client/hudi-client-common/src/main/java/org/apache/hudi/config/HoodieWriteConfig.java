@@ -373,6 +373,18 @@ public class HoodieWriteConfig extends DefaultHoodieConfig {
     return Boolean.valueOf(props.getProperty(HoodieCompactionConfig.COMPACTION_REVERSE_LOG_READ_ENABLED_PROP));
   }
 
+  public boolean isAsyncClusteringEnabled() {
+    return Boolean.parseBoolean(props.getProperty(HoodieClusteringConfig.ASYNC_CLUSTERING_ENABLED));
+  }
+
+  public boolean isInlineClustering() {
+    return Boolean.parseBoolean(props.getProperty(HoodieClusteringConfig.INLINE_CLUSTERING_PROP));
+  }
+
+  public int getInlineClusterMaxCommits() {
+    return Integer.parseInt(props.getProperty(HoodieClusteringConfig.INLINE_CLUSTERING_NUM_COMMIT_PROP));
+  }
+
   public String getPayloadClass() {
     return props.getProperty(HoodieCompactionConfig.PAYLOAD_CLASS_PROP);
   }
@@ -387,6 +399,33 @@ public class HoodieWriteConfig extends DefaultHoodieConfig {
 
   public Boolean shouldCleanBootstrapBaseFile() {
     return Boolean.valueOf(props.getProperty(HoodieCompactionConfig.CLEANER_BOOTSTRAP_BASE_FILE_ENABLED));
+  }
+
+  /**
+   * Clustering properties.
+   */
+  public String getScheduleClusteringStrategyClass() {
+    return props.getProperty(HoodieClusteringConfig.SCHEDULE_CLUSTERING_STRATEGY_CLASS);
+  }
+
+  public String getRunClusteringStrategyClass() {
+    return props.getProperty(HoodieClusteringConfig.RUN_CLUSTERING_STRATEGY_CLASS);
+  }
+
+  public long getClusteringMaxBytesInGroup() {
+    return Long.parseLong(props.getProperty(HoodieClusteringConfig.CLUSTERING_MAX_BYTES_IN_GROUP));
+  }
+
+  public long getClusteringMaxNumGroups() {
+    return Long.parseLong(props.getProperty(HoodieClusteringConfig.CLUSTERING_MAX_NUM_GROUPS));
+  }
+
+  public long getClusteringTargetFileMaxBytes() {
+    return Long.parseLong(props.getProperty(HoodieClusteringConfig.CLUSTERING_TARGET_FILE_MAX_BYTES));
+  }
+
+  public int getTargetPartitionsForClustering() {
+    return Integer.parseInt(props.getProperty(HoodieClusteringConfig.CLUSTERING_TARGET_PARTITIONS));
   }
 
   /**
@@ -782,6 +821,7 @@ public class HoodieWriteConfig extends DefaultHoodieConfig {
     private boolean isIndexConfigSet = false;
     private boolean isStorageConfigSet = false;
     private boolean isCompactionConfigSet = false;
+    private boolean isClusteringConfigSet = false;
     private boolean isMetricsConfigSet = false;
     private boolean isBootstrapConfigSet = false;
     private boolean isMemoryConfigSet = false;
@@ -902,6 +942,12 @@ public class HoodieWriteConfig extends DefaultHoodieConfig {
     public Builder withCompactionConfig(HoodieCompactionConfig compactionConfig) {
       props.putAll(compactionConfig.getProps());
       isCompactionConfigSet = true;
+      return this;
+    }
+
+    public Builder withClusteringConfig(HoodieClusteringConfig clusteringConfig) {
+      props.putAll(clusteringConfig.getProps());
+      isClusteringConfigSet = true;
       return this;
     }
 
@@ -1053,6 +1099,8 @@ public class HoodieWriteConfig extends DefaultHoodieConfig {
       setDefaultOnCondition(props, !isStorageConfigSet, HoodieStorageConfig.newBuilder().fromProperties(props).build());
       setDefaultOnCondition(props, !isCompactionConfigSet,
           HoodieCompactionConfig.newBuilder().fromProperties(props).build());
+      setDefaultOnCondition(props, !isClusteringConfigSet,
+          HoodieClusteringConfig.newBuilder().fromProperties(props).build());
       setDefaultOnCondition(props, !isMetricsConfigSet, HoodieMetricsConfig.newBuilder().fromProperties(props).build());
       setDefaultOnCondition(props, !isBootstrapConfigSet,
           HoodieBootstrapConfig.newBuilder().fromProperties(props).build());

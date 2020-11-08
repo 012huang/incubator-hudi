@@ -41,6 +41,11 @@
          "default": null
       },
       {
+         "name":"numOutputGroups",
+         "type":["int", "null"],
+         "default": 1
+      },
+      {
          "name":"version",
          "type":["int", "null"],
          "default": 1

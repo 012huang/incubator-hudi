@@ -1,0 +1,114 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.hudi.table.action.cluster.strategy;
+
+import org.apache.hudi.avro.model.HoodieClusteringGroup;
+import org.apache.hudi.avro.model.HoodieClusteringPlan;
+import org.apache.hudi.avro.model.HoodieClusteringStrategy;
+import org.apache.hudi.client.common.HoodieEngineContext;
+import org.apache.hudi.common.fs.FSUtils;
+import org.apache.hudi.common.model.FileSlice;
+import org.apache.hudi.common.model.HoodieRecordPayload;
+import org.apache.hudi.common.table.HoodieTableMetaClient;
+import org.apache.hudi.common.util.Option;
+import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.exception.HoodieIOException;
+import org.apache.hudi.table.HoodieTable;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+/**
+ * Scheduling strategy with restriction that clustering groups can only contain files from same partition.
+ */
+public abstract class PartitionAwareScheduleClusteringStrategy<T extends HoodieRecordPayload,I,K,O> extends ScheduleClusteringStrategy<T,I,K,O> {
+  private static final Logger LOG = LogManager.getLogger(PartitionAwareScheduleClusteringStrategy.class);
+  // With more than 50 groups, we see performance degradation with this Strategy implementation.
+  private static final int MAX_CLUSTERING_GROUPS_STRATEGY = 50;
+
+  public PartitionAwareScheduleClusteringStrategy(HoodieTable table, HoodieEngineContext engineContext, HoodieWriteConfig writeConfig) {
+    super(table, engineContext, writeConfig);
+  }
+
+  /**
+   * Create Clustering group based on files eligible for clustering in the partition.
+   */
+  protected abstract Stream<HoodieClusteringGroup> buildClusteringGroupsForPartition(String partitionPath,
+                                                                                     List<FileSlice> fileSlices);
+
+  /**
+   * Return list of partition paths to be considered for clustering.
+   */
+  protected List<String> filterPartitionPaths(List<String> partitionPaths) {
+    return partitionPaths;
+  }
+
+  @Override
+  public Option<HoodieClusteringPlan> generateClusteringPlan() {
+    try {
+      HoodieTableMetaClient metaClient = getHoodieTable().getMetaClient();
+      LOG.info("Scheduling clustering for " + metaClient.getBasePath());
+      List<String> partitionPaths = FSUtils.getAllPartitionPaths(metaClient.getFs(), metaClient.getBasePath(),
+          getWriteConfig().shouldAssumeDatePartitioning());
+
+      // filter the partition paths if needed to reduce list status
+      partitionPaths = filterPartitionPaths(partitionPaths);
+
+      if (partitionPaths.isEmpty()) {
+        // In case no partitions could be picked, return no clustering plan
+        return Option.empty();
+      }
+
+      long maxClusteringGroups = getWriteConfig().getClusteringMaxNumGroups();
+      if (maxClusteringGroups > MAX_CLUSTERING_GROUPS_STRATEGY) {
+        LOG.warn("Reducing max clustering groups to " + MAX_CLUSTERING_GROUPS_STRATEGY + " for performance reasons");
+        maxClusteringGroups = MAX_CLUSTERING_GROUPS_STRATEGY;
+      }
+
+      List<HoodieClusteringGroup> clusteringGroups = partitionPaths.stream()
+          .flatMap(partition ->
+              buildClusteringGroupsForPartition(partition, getFileSlicesEligibleForClustering(partition)))
+          .limit(maxClusteringGroups)
+          .collect(Collectors.toList());
+
+      if (clusteringGroups.isEmpty()) {
+        LOG.info("No data available to cluster");
+        return Option.empty();
+      }
+
+      HoodieClusteringStrategy strategy = HoodieClusteringStrategy.newBuilder()
+          .setStrategyClassName(getWriteConfig().getRunClusteringStrategyClass())
+          .setStrategyParams(getStrategyParams())
+          .build();
+
+      return Option.of(HoodieClusteringPlan.newBuilder()
+          .setStrategy(strategy)
+          .setInputGroups(clusteringGroups)
+          .setExtraMetadata(getExtraMetadata())
+          .setVersion(getPlanVersion())
+          .build());
+    } catch (IOException e) {
+      throw new HoodieIOException("Unable to schedule clustering", e);
+    }
+  }
+}
